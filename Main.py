@@ -3,18 +3,30 @@ import os
 import re
 import time
 import requests
+import logging
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 
 # Загружаем переменные окружения
 load_dotenv()
 
+# --- НАСТРОЙКА СИСТЕМЫ ЛОГИРОВАНИЯ ---
+logging.basicConfig(
+    level=logging.INFO, # Скрываем всё, что ниже INFO (т.е. DEBUG не пишется)
+    format='%(asctime)s | %(levelname)-7s | %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S',
+    handlers=[
+        logging.FileHandler("sync_salesdrive.log", encoding='utf-8'),
+        logging.StreamHandler()
+    ]
+)
+
 # --- КЛЮЧИ И НАСТРОЙКИ ---
 API_KEY = os.getenv("API_KEY")
 DOMAIN = os.getenv("DOMAIN")
 DILOVOD_API_URL = "https://api.dilovod.ua/api/"
 DILOVOD_TOKEN = os.getenv("DILOVOD_TOKEN") 
-ORGANIZATIONS_MAP = os.getenv("ORGANIZATIONS_MAP")
+
 
 # --- СЛОВАРИ ДЛЯ ФИЛЬТРОВ ---
 
@@ -70,6 +82,20 @@ PAYMENT_METHODS_MAP = {
     }
 }
 
+ORGANIZATIONS_MAP = {
+    "Б": {
+        "crm_code": 3, 
+        "dil_code": "1115000000001001"
+    },
+    "Н": {
+        "crm_code": 4, 
+        "dil_code": "1100400000001005"
+    },
+    "Т": {
+        "crm_code": 1, 
+        "dil_code": "1100400000001002"
+    }
+}
 ignored_statuses = {1, 2, 6, 7, 8, 9, 10}
 
 # --- ОСНОВНАЯ ФУНКЦИЯ ---
@@ -101,7 +127,7 @@ def get_crm_orders(days_back=30, domain=DOMAIN, api_key=API_KEY):
     filtered_orders = []
     page = 1
 
-    print(f"🔄 Загрузка заказов с CRM {date_from}...")
+    logging.debug(f"🔄 Загрузка заказов с CRM {date_from}...")
 
     # 3. Цикл пагинации для сбора всех страниц
     while True:
@@ -111,7 +137,7 @@ def get_crm_orders(days_back=30, domain=DOMAIN, api_key=API_KEY):
             
             # Проверка на ошибки (например, неверный ключ)
             if response.status_code != 200:
-                print(f"❌ Ошибка API SalesDrive: {response.status_code} - {response.text}")
+                logging.error(f"Ошибка API SalesDrive: {response.status_code} - {response.text}")
                 break
                 
             data = response.json()
@@ -142,10 +168,10 @@ def get_crm_orders(days_back=30, domain=DOMAIN, api_key=API_KEY):
             page += 1
 
         except Exception as e:
-            print(f"❌ Ошибка при выполнении запроса: {e}")
+            logging.error(f"Ошибка при выполнении запроса: {e}")
             break
 
-    print(f"✅ Выгрузка завершена! Найдено подходящих заказов: {len(filtered_orders)}")
+    logging.debug(f"Выгрузка завершена! Найдено подходящих заказов: {len(filtered_orders)}")
     return filtered_orders
 
 def get_dilovod_orders(days_back=30, dilovod_token=DILOVOD_TOKEN):
@@ -156,7 +182,7 @@ def get_dilovod_orders(days_back=30, dilovod_token=DILOVOD_TOKEN):
     # Діловод обычно понимает формат дат YYYY-MM-DD
     date_from = (datetime.now() - timedelta(days=days_back)).strftime('%Y-%m-%d')
     
-    print(f"🔄 Загрузка заказов из Діловод с {date_from}...")
+    logging.debug(f"Загрузка заказов из Діловод с {date_from}...")
 
     # 2. Формируем пакет запроса согласно API Діловода
     packet = {
@@ -195,7 +221,7 @@ def get_dilovod_orders(days_back=30, dilovod_token=DILOVOD_TOKEN):
         
         # Проверяем на ошибки HTTP
         if response.status_code != 200:
-            print(f"❌ Ошибка соединения с Діловод: {response.status_code}")
+            logging.error(f"Ошибка соединения с Діловод: {response.status_code}")
             return []
             
         result = response.json()
@@ -203,18 +229,18 @@ def get_dilovod_orders(days_back=30, dilovod_token=DILOVOD_TOKEN):
         # 4. Обработка ответа
         # Если API вернуло словарь с ключом 'error'
         if isinstance(result, dict) and 'error' in result:
-            print(f"❌ Ошибка Діловода: {result['error']}")
+            logging.error(f"Ошибка Діловода: {result['error']}")
             return []
             
         # Успешный запрос обычно возвращает список словарей (записей)
         if isinstance(result, list):
-            print(f"✅ Готово! Найдено заказов в Діловоде: {len(result)}")
+            logging.debug(f"Готово! Найдено заказов в Діловоде: {len(result)}")
             return result
             
         return []
 
     except Exception as e:
-        print(f"❌ Критическая ошибка при запросе к Діловод: {e}")
+        logging.error(f"❌ Критическая ошибка при запросе к Діловод: {e}")
         return []
 
 def get_missing_orders(crm_orders, dilovod_orders):
@@ -222,7 +248,7 @@ def get_missing_orders(crm_orders, dilovod_orders):
     Сравнивает списки заказов CRM и Діловода.
     Возвращает список заказов, которые есть в CRM, но отсутствуют в Діловоде.
     """
-    print("🔄 Начинаем сверку баз...")
+    logging.debug("Начинаем сверку баз...")
     
     # 1. Собираем все ID заказов CRM, которые уже есть в Діловоде
     dilovod_crm_ids = set()
@@ -249,14 +275,14 @@ def get_missing_orders(crm_orders, dilovod_orders):
             # Берем ID заказа из CRM (безопасное приведение к int)
             crm_id = int(crm_order.get('id', 0))
         except ValueError:
-            print(f"⚠️ Ошибка типа ID в заказе CRM: {crm_order.get('id')}")
+            logging.warning(f"Ошибка типа ID в заказе CRM: {crm_order.get('id')}")
             continue
             
         # Если этого ID нет в Діловоде, добавляем в список потеряшек
         if crm_id and crm_id not in dilovod_crm_ids:
             missing_orders.append(crm_order)
             
-    print(f"✅ Сверка завершена! Найдено {len(missing_orders)} заказов, которых нет в Діловоде.")
+    logging.debug(f"Сверка завершена! Найдено {len(missing_orders)} заказов, которых нет в Діловоде.")
     return missing_orders
 
 def process_missing_orders(missing_orders):
@@ -268,7 +294,7 @@ def process_missing_orders(missing_orders):
     
     created_count = 0
 
-    print("🚀 Начинаем перенос недостающих заказов в Діловод...")
+    logging.debug("Начинаем перенос недостающих заказов в Діловод...")
 
     for order in missing_orders:
         order_start = time.time() # Замер начала обработки заказа
@@ -278,30 +304,30 @@ def process_missing_orders(missing_orders):
         try:
             status_id = int(order.get('statusId', 0))
         except ValueError:
-            print(f"⚠️ Ошибка типа статуса в заказе CRM №{order_id}")
+            logging.warning(f"Ошибка типа статуса в заказе CRM №{order_id}")
             continue
 
         # 1. Проверяем, не входит ли статус в наш "черный список"
         if status_id in ignored_statuses:
-            print(f"⏩ Пропуск заказа №{order_id} (статус {status_id} в списке исключений)")
+            logging.debug(f"Пропуск заказа №{order_id} (статус {status_id} в списке исключений)")
             continue
 
         # 2. Если статус разрешен, запускаем процесс создания
-        print(f"➕ Отправка заказа №{order_id} статус {status_id} в Діловод...")
+        logging.debug(f"Отправка заказа №{order_id} статус {status_id} в Діловод...")
         
         new_dilovod_id = send_to_dilovod(order)
         
         if new_dilovod_id:
-            print(f"✅ Заказ №{order_id} успешно перенесен! (ID Діловод: {new_dilovod_id})")
+            logging.info(f"Заказ №{order_id} успешно перенесен! (ID Діловод: {new_dilovod_id})")
             created_count += 1
             mark_order_in_salesdrive(order_id, "id_23")
             
         else:
-            print(f"❌ Ошибка при создании заказа №{order_id}")
+            logging.error(f"Ошибка при создании заказа №{order_id}")
             mark_order_in_salesdrive(order_id, "id_24")
         order_end = time.time() # Замер конца
-        print(f"⏱️ Заказ №{order_id} обработан за {order_end - order_start:.3f} сек.")
-    print(f"🎉 Процесс завершен. Успешно перенесено заказов: {created_count}")
+        logging.debug(f"Заказ №{order_id} обработан за {order_end - order_start:.3f} сек.")
+    logging.info(f"Процесс завершен. Успешно перенесено заказов: {created_count}")
 
 def get_dilovod_code(map_dict, crm_id):
     """
@@ -325,7 +351,7 @@ def send_to_dilovod(crm_order):
         org_id_crm = int(crm_order.get('organizationId', 0))
         status_id_crm = int(crm_order.get('statusId', 0))
     except ValueError:
-        print(f"❌ Ошибка: Неверный формат ID организации или статуса в заказе {order_id}")
+        logging.error(f"Ошибка: Неверный формат ID организации или статуса в заказе {order_id}")
         return False
 
     # 2. Ищем соответствующие ID для Діловода
@@ -333,11 +359,11 @@ def send_to_dilovod(crm_order):
     state_code = get_dilovod_code(STATUSES_MAP, status_id_crm)
 
     if not firm_code:
-        print(f"❌ Ошибка: Для организации CRM={org_id_crm} не найден Діловод ID в словаре.")
+        logging.error(f"Ошибка: Для организации CRM={org_id_crm} не найден Діловод ID в словаре.")
         return False
 
     if not state_code:
-        print(f"❌ Ошибка: Для статуса CRM={status_id_crm} не найден Діловод ID в словаре. Заказ {order_id} не перенесен.")
+        logging.error(f"Ошибка: Для статуса CRM={status_id_crm} не найден Діловод ID в словаре. Заказ {order_id} не перенесен.")
         return False
 
 
@@ -385,7 +411,7 @@ def send_to_dilovod(crm_order):
             })
 
     if not dilovod_goods:
-        print(f"⚠️ В заказе {order_id} нет товаров, найденных в Діловоде. Пропускаем создание.")
+        logging.warning(f"В заказе {order_id} нет товаров, найденных в Діловоде. Пропускаем создание.")
         return False
 
     # 4. Формируем JSON-пакет данных для Діловода
@@ -421,12 +447,12 @@ def send_to_dilovod(crm_order):
         elif isinstance(res, list) and len(res) > 0: 
             return res[0].get('id')
         elif isinstance(res, dict) and 'error' in res:
-            print(f"❌ Ошибка Діловода при создании заказа {order_id}: {res['error']}")
+            logging.error(f"Ошибка Діловода при создании заказа {order_id}: {res['error']}")
             return False
             
         return False
     except Exception as e:
-        print(f"❌ Критическая ошибка соединения при отправке заказа {order_id}: {e}")
+        logging.error(f"Критическая ошибка соединения при отправке заказа {order_id}: {e}")
         return False
 
 def find_product_in_dilovod(sku):
@@ -460,13 +486,13 @@ def mark_order_in_salesdrive(order_id, mark_code):
     try:
         response = requests.post(url, headers=headers, data=payload)
         if response.status_code in [200, 201]:
-            print(f"☑️ Заказ {order_id} отмечен в SalesDrive (dilovod = {mark_code})")
+            logging.info(f"Заказ {order_id} отмечен в SalesDrive (dilovod = {mark_code})")
             return True
         else:
-            print(f"⚠️ Ошибка отметки SalesDrive: {response.text[:100]}")
+            logging.error(f"Ошибка отметки SalesDrive: {response.text[:100]}")
             return False
     except Exception as e:
-        print(f"❌ Ошибка: {e}")
+        logging.error(f"Ошибка: {e}")
         return False
 
 def update_dilovod_status(dilovod_id, new_state_code):
@@ -490,19 +516,19 @@ def update_dilovod_status(dilovod_id, new_state_code):
         res = response.json()
         
         if isinstance(res, dict) and 'error' in res:
-            print(f"❌ Ошибка Діловода при обновлении статуса: {res['error']}")
+            logging.error(f"Ошибка Діловода при обновлении статуса: {res['error']}")
             return False
             
         return True
     except Exception as e:
-        print(f"❌ Критическая ошибка при обновлении статуса: {e}")
+        logging.error(f"Критическая ошибка при обновлении статуса: {e}")
         return False
 
 def sync_order_statuses(crm_orders, dil_orders):
     """
     Сверяет статусы заказов. Если статус в CRM изменился, обновляет его в Діловоде.
     """
-    print("🔄 Начинаем синхронизацию статусов...")
+    logging.debug("Начинаем синхронизацию статусов...")
     updated_count = 0
 
     # 1. Создаем словарь для быстрого поиска заказов Діловода по CRM ID
@@ -536,28 +562,22 @@ def sync_order_statuses(crm_orders, dil_orders):
             if target_dil_status and target_dil_status != current_dil_status:
                 dilovod_doc_id = dil_order.get('id')
                 
-                print(f"🔄 Заказ {crm_id}: смена статуса в Діловоде на '{target_dil_status}'...")
+                logging.debug(f"Заказ {crm_id}: смена статуса в Діловоде на '{target_dil_status}'...")
                 
                 # Вызываем функцию обновления
                 if update_dilovod_status(dilovod_doc_id, target_dil_status):
-                    print(f"✅ Статус заказа {crm_id} успешно обновлен!")
+                    logging.info(f"Статус заказа {crm_id} успешно обновлен на '{target_dil_status}'!")
                     updated_count += 1
                 else:
-                    print(f"⚠️ Не удалось обновить статус заказа {crm_id}.")
+                    logging.warning(f"Не удалось обновить статус заказа {crm_id}.")
 
-    print(f"🎉 Синхронизация завершена. Обновлено статусов: {updated_count}")
+    logging.info(f"Синхронизация завершена. Обновлено статусов: {updated_count}")
         
 if __name__ == "__main__":
-    while True:
-        crm_orders = get_crm_orders()
-        dil_orders = get_dilovod_orders()
-        missing_orders = get_missing_orders(crm_orders, dil_orders)
-        
-        process_missing_orders(missing_orders)
-        
-        sync_order_statuses(crm_orders, dil_orders)
-        
-        time.sleep(30)
-
+    crm_orders = get_crm_orders()
+    dil_orders = get_dilovod_orders()
+    missing_orders = get_missing_orders(crm_orders, dil_orders)
     
-        
+    process_missing_orders(missing_orders)
+    
+    sync_order_statuses(crm_orders, dil_orders)
