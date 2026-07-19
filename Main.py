@@ -289,6 +289,60 @@ def get_missing_orders(crm_orders, dilovod_orders):
     logging.debug(f"Сверка завершена! Найдено {len(missing_orders)} заказов, которых нет в Діловоде.")
     return missing_orders
 
+def get_order_dilovod_mark(order):
+    """
+    Безопасно извлекает значение поля dilovod из заказа.
+    Поддерживает строковые значения, списки, словари и вложенные структуры.
+    """
+    def search(value):
+        if isinstance(value, dict):
+            if 'dilovod' in value:
+                return value.get('dilovod')
+            for item in value.values():
+                found = search(item)
+                if found is not None:
+                    return found
+        elif isinstance(value, list):
+            for item in value:
+                found = search(item)
+                if found is not None:
+                    return found
+        return None
+
+    value = search(order)
+    if value is None:
+        return None
+
+    if isinstance(value, (list, tuple)):
+        return value[0] if value else None
+
+    if isinstance(value, dict):
+        if 'value' in value:
+            return value.get('value')
+        if 'id' in value:
+            return value.get('id')
+        return None
+
+    return value
+
+def is_missing_products_notification_skipped(order):
+    """Проверяет, что заказ уже отмечен как 'id_24' / 'Ні'."""
+    value = get_order_dilovod_mark(order)
+    if value is None:
+        return False
+
+    if isinstance(value, bool):
+        return not value
+
+    if isinstance(value, (int, float)):
+        return int(value) == 24
+
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        return normalized in {'id_24', 'ні', 'ni', 'no', 'n', 'false', '0', 'нет'}
+
+    return False
+
 def process_missing_orders(missing_orders):
     """
     Проходится по списку недостающих заказов, фильтрует их по статусу CRM 
@@ -322,12 +376,12 @@ def process_missing_orders(missing_orders):
         
         # Обработка ответа
         if isinstance(result, tuple) and result[0] == "missing_products":
-            if order.get('dilovod') == 'id_24':
-                continue
-            # Спец-сообщение для товаров
-            error_text = prepare_missing_products_message(order_id, result[1])
-            send_telegram_message(error_text)
-            mark_order_in_salesdrive(order_id, "id_24")
+            if not is_missing_products_notification_skipped(order):
+                error_text = prepare_missing_products_message(order_id, result[1])
+                send_telegram_message(error_text)
+                mark_order_in_salesdrive(order_id, "id_24")
+            else:
+                logging.info(f"Заказ №{order_id} уже помечен как id_24, пропускаем повторное уведомление")
             
         elif result:
             logging.info(f"Заказ №{order_id} успешно перенесен!")
