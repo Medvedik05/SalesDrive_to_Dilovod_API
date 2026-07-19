@@ -6,9 +6,12 @@ import requests
 import logging
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
+from Tg_bot import prepare_error_message, prepare_missing_products_message, send_telegram_message
 
 # Загружаем переменные окружения
 load_dotenv()
+base_dir = os.path.dirname(os.path.abspath(__file__))
+log_file_path = os.path.join(base_dir, "sync_salesdrive.log")
 
 # --- НАСТРОЙКА СИСТЕМЫ ЛОГИРОВАНИЯ ---
 logging.basicConfig(
@@ -16,7 +19,7 @@ logging.basicConfig(
     format='%(asctime)s | %(levelname)-7s | %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S',
     handlers=[
-        logging.FileHandler("sync_salesdrive.log", encoding='utf-8'),
+        logging.FileHandler(log_file_path, encoding='utf-8'),
         logging.StreamHandler()
     ]
 )
@@ -96,6 +99,7 @@ ORGANIZATIONS_MAP = {
         "dil_code": "1100400000001002"
     }
 }
+
 ignored_statuses = {1, 2, 6, 7, 8, 9, 10}
 
 # --- ОСНОВНАЯ ФУНКЦИЯ ---
@@ -297,7 +301,6 @@ def process_missing_orders(missing_orders):
     logging.debug("Начинаем перенос недостающих заказов в Діловод...")
 
     for order in missing_orders:
-        order_start = time.time() # Замер начала обработки заказа
         order_id = order.get('id')
         
         # Безопасное извлечение статуса CRM (защита от строковых значений)
@@ -315,19 +318,27 @@ def process_missing_orders(missing_orders):
         # 2. Если статус разрешен, запускаем процесс создания
         logging.debug(f"Отправка заказа №{order_id} статус {status_id} в Діловод...")
         
-        new_dilovod_id = send_to_dilovod(order)
+        result = send_to_dilovod(order)
         
-        if new_dilovod_id:
-            logging.info(f"Заказ №{order_id} успешно перенесен! (ID Діловод: {new_dilovod_id})")
-            created_count += 1
+        # Обработка ответа
+        if isinstance(result, tuple) and result[0] == "missing_products":
+            # Спец-сообщение для товаров
+            error_text = prepare_missing_products_message(order_id, result[1])
+            send_telegram_message(error_text)
+            mark_order_in_salesdrive(order_id, "id_24")
+            
+        elif result:
+            logging.info(f"Заказ №{order_id} успешно перенесен!")
             mark_order_in_salesdrive(order_id, "id_23")
+            created_count += 1
             
         else:
-            logging.error(f"Ошибка при создании заказа №{order_id}")
+            # Общая ошибка (API, сеть и т.д.)
+            error_text = prepare_error_message(order_id, "неизвестно", "Ошибка создания в Діловод")
+            send_telegram_message(error_text)
             mark_order_in_salesdrive(order_id, "id_24")
-        order_end = time.time() # Замер конца
-        logging.debug(f"Заказ №{order_id} обработан за {order_end - order_start:.3f} сек.")
-    logging.info(f"Процесс завершен. Успешно перенесено заказов: {created_count}")
+            
+    logging.info(f"Процесс завершен. Успешно перенесено: {created_count}")
 
 def get_dilovod_code(map_dict, crm_id):
     """
@@ -367,8 +378,6 @@ def send_to_dilovod(crm_order):
         return False
 
 
-    
-
     # Достаем телефон
     phone = ''
     primary_contact = crm_order.get('primaryContact')
@@ -389,6 +398,7 @@ def send_to_dilovod(crm_order):
 
     # 3. Формируем список товаров
     dilovod_goods = []
+    missing_skus = []
     for prod in crm_order.get('products', []):
         sku = prod.get('sku')
         if not sku: 
@@ -409,6 +419,11 @@ def send_to_dilovod(crm_order):
                 "amountCur": row_sum, 
                 "priceAmount": row_sum
             })
+        else: missing_skus.append(sku)
+        
+    # Если товары не найдены, возвращаем сигнал о них
+    if missing_skus:
+        return "missing_products", missing_skus
 
     if not dilovod_goods:
         logging.warning(f"В заказе {order_id} нет товаров, найденных в Діловоде. Пропускаем создание.")
