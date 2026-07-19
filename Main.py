@@ -322,6 +322,8 @@ def process_missing_orders(missing_orders):
         
         # Обработка ответа
         if isinstance(result, tuple) and result[0] == "missing_products":
+            if order.get('dilovod') == 'id_24':
+                continue
             # Спец-сообщение для товаров
             error_text = prepare_missing_products_message(order_id, result[1])
             send_telegram_message(error_text)
