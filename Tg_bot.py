@@ -21,7 +21,6 @@ def prepare_missing_products_message(order_id, missing_skus):
         f"Ці товари є в SalesDrive, але не знайдені в Діловоді:\n"
         f"{skus_str}\n"
         f"━━━━━━━━━━━━━━━━━━\n"
-        f"<i>⚠️ Будь ласка, додайте ці артикули в Діловод.</i>"
     )
     return message
 
