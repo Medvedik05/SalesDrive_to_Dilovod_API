@@ -643,8 +643,27 @@ def sync_order_statuses(crm_orders, dil_orders):
                     logging.warning(f"Не удалось обновить статус заказа {crm_id}.")
 
     logging.info(f"Синхронизация завершена. Обновлено статусов: {updated_count}")
+
+def check_dilovod_connection():
+    """Проверяет доступность API Діловода перед началом работы."""
+    url = f"https://api.dilovod.ua/v2/iservices/json"  # Базовый URL или эндпоинт авторизации
+    headers = {"X-Session-ID": API_KEY} # Или твой метод авторизации, который используется в проекте
+    
+    try:
+        # Делаем легкий запрос (например, пустой или на минимальный метод)
+        # Либо используем тот метод авторизации/проверки, который уже есть в твоем проекте
+        response = requests.post(url, headers=headers, json={"action": "ping"}, timeout=5)
         
+        # Если сервер ответил (даже с ошибкой авторизации, главное — он живой)
+        logging.info("🌐 Пинг Діловода успешен: сервер доступен.")
+        return True
+    except requests.exceptions.RequestException as e:
+        logging.error(f"❌ Критическая ошибка: Діловод не отвечает! {e}")
+        return False
+         
 if __name__ == "__main__":
+    if check_dilovod_connection() == False:
+        exit()
     crm_orders = get_crm_orders()
     dil_orders = get_dilovod_orders()
     missing_orders = get_missing_orders(crm_orders, dil_orders)
