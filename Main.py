@@ -389,10 +389,12 @@ def process_missing_orders(missing_orders):
             created_count += 1
             
         else:
-            # Общая ошибка (API, сеть и т.д.)
-            error_text = prepare_error_message(order_id, "неизвестно", "Ошибка создания в Діловод")
-            send_telegram_message(error_text)
-            mark_order_in_salesdrive(order_id, "id_24")
+            if not is_missing_products_notification_skipped(order):
+                error_text = prepare_error_message(order_id, "неизвестно", "Ошибка создания в Діловод")
+                send_telegram_message(error_text)
+                mark_order_in_salesdrive(order_id, "id_24")
+            else:
+                logging.info(f"Заказ №{order_id} уже помечен как id_24, пропускаем повторное уведомление об общей ошибке")
             
     logging.info(f"Процесс завершен. Успешно перенесено: {created_count}")
 
@@ -500,7 +502,7 @@ def send_to_dilovod(crm_order):
                 "currency": "1101200000001001",
                 "person": "1100100000000001",
                 "storage": "1100700000000001",
-                "deliveryMethod_forDel": "1110400000001001",   
+                "deliveryMethod": "1110400000001001",   
                 "details": phone,                 
                 "deliveryRemark_forDel": ttn            
             },
