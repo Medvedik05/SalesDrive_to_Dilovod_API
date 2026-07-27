@@ -230,11 +230,11 @@ def get_dilovod_orders(days_back=30, dilovod_token=DILOVOD_TOKEN):
             
         result = response.json()
         
-        # 4. Обработка ответа
+        ## 4. Обработка ответа
         # Если API вернуло словарь с ключом 'error'
         if isinstance(result, dict) and 'error' in result:
             logging.error(f"Ошибка Діловода: {result['error']}")
-            return []
+            return None  # РАНЬШЕ ТУТ БЫЛО return []
             
         # Успешный запрос обычно возвращает список словарей (записей)
         if isinstance(result, list):
@@ -242,6 +242,10 @@ def get_dilovod_orders(days_back=30, dilovod_token=DILOVOD_TOKEN):
             return result
             
         return []
+
+    except Exception as e:
+        logging.error(f"❌ Критическая ошибка при запросе к Діловод: {e}")
+        return None  
 
     except Exception as e:
         logging.error(f"❌ Критическая ошибка при запросе к Діловод: {e}")
@@ -356,6 +360,11 @@ def process_missing_orders(missing_orders):
 
     for order in missing_orders:
         order_id = order.get('id')
+        
+        dilovod_mark = get_order_dilovod_mark(order)
+        if str(dilovod_mark).strip().lower() in {'id_23', 'так', '23'}:
+            logging.debug(f"Заказ №{order_id} уже успешно перенесен (id_23). Пропускаем дубль.")
+            continue
         
         # Безопасное извлечение статуса CRM (защита от строковых значений)
         try:
@@ -666,10 +675,14 @@ def check_dilovod_connection():
 if __name__ == "__main__":
     if check_dilovod_connection() == False:
         exit()
+        
     crm_orders = get_crm_orders()
     dil_orders = get_dilovod_orders()
+    
+    if dil_orders is None:
+        logging.error("Синхронизация остановлена: невозможно получить данные из Діловод.")
+        exit()
+        
     missing_orders = get_missing_orders(crm_orders, dil_orders)
-    
     process_missing_orders(missing_orders)
-    
     sync_order_statuses(crm_orders, dil_orders)
