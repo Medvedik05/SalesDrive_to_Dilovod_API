@@ -88,7 +88,7 @@ PAYMENT_METHODS_MAP = {
 ORGANIZATIONS_MAP = {
     "Б": {
         "crm_code": 3, 
-        "dil_code": "1115000000001001"
+        "dil_code": "1100400000001004"
     },
     "Н": {
         "crm_code": 4, 
