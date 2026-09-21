@@ -27,7 +27,7 @@ def get_order_by_id(order_id):
     }
     
     try:
-        print("⏳ Запрос данных для заказа №{order_id} из SalesDrive...")
+        print(f"⏳ Запрос данных для заказа №{order_id} из SalesDrive...")
         response = requests.get(url, headers=headers, params=params)
         
         if response.status_code != 200:
@@ -38,17 +38,25 @@ def get_order_by_id(order_id):
         orders = data.get('data', [])
         
         if not orders:
-            print(f"⚠️ Заказ с ID {order_id} не найден в SalesDrive.")
+            print(f"⚠️ Заказы не найдены в SalesDrive.")
             return
             
-        # Берем первый найденный заказ
-        order = orders[0]
+        # Ищем нужный заказ вручную среди полученных
+        target_order = None
+        for o in orders:
+            if str(o.get('id')) == str(order_id):
+                target_order = o
+                break
+                
+        if not target_order:
+            print(f"⚠️ Заказ с ID {order_id} не найден в ответе API.")
+            return
         
         # Выводим красиво отформатированный JSON
         print("\n" + "="*40)
         print(f"📦 Информация по заказу №{order_id}:")
         print("="*40)
-        print(json.dumps(order, indent=4, ensure_ascii=False))
+        print(json.dumps(target_order, indent=4, ensure_ascii=False))
         print("="*40)
         
     except Exception as e:
@@ -56,7 +64,7 @@ def get_order_by_id(order_id):
 
 if __name__ == "__main__":
     # Задаем ID заказа, который нужно проверить (можешь поменять на нужный)
-    target_order_id = 102
+    target_order_id = 735
     
     if target_order_id:
         get_order_by_id(target_order_id)
