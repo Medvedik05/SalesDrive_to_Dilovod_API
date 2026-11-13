@@ -127,7 +127,7 @@ def get_crm_orders(days_back=30, domain=DOMAIN, api_key=API_KEY):
     
     # Базовые параметры API запроса
     params = {
-        "limit": 100,
+        "limit": 1000,
         "filter[orderTime][from]": date_from
     }
     
