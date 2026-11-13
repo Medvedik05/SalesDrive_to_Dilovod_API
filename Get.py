@@ -64,7 +64,7 @@ def get_order_by_id(order_id):
 
 if __name__ == "__main__":
     # Задаем ID заказа, который нужно проверить (можешь поменять на нужный)
-    target_order_id = 735
+    target_order_id = 1410
     
     if target_order_id:
         get_order_by_id(target_order_id)

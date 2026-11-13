@@ -140,7 +140,7 @@ def get_crm_orders(days_back=30, domain=DOMAIN, api_key=API_KEY):
     while True:
         params["page"] = page
         try:
-            response = requests.get(url, headers=headers, params=params)
+            response = requests.get(url, headers=headers, params=params, timeout=30)
             
             # Проверка на ошибки (например, неверный ключ)
             if response.status_code != 200:
@@ -167,12 +167,17 @@ def get_crm_orders(days_back=30, domain=DOMAIN, api_key=API_KEY):
             
             # Проверка метаданных на наличие следующих страниц
             meta = data.get('meta', {})
-            total_pages = meta.get('totalPages', 1)
+            total_pages = meta.get('totalPages')
             
-            if page >= total_pages:
+            if total_pages is not None and page >= int(total_pages):
                 break
-                
+
+            if len(orders) < params["limit"]:
+                break
+            print(f"{page} done")  
             page += 1
+            
+            time.sleep(10)
 
         except Exception as e:
             logging.error(f"Ошибка при выполнении запроса: {e}")
