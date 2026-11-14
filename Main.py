@@ -174,7 +174,7 @@ def get_crm_orders(days_back=30, domain=DOMAIN, api_key=API_KEY):
 
             if len(orders) < params["limit"]:
                 break
-            print(f"{page} done")  
+            logging.debug(f"Page: {page}")  
             page += 1
             
             time.sleep(10)
