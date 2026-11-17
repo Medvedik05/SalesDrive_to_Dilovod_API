@@ -106,85 +106,118 @@ ORGANIZATIONS_MAP = {
 ignored_statuses = {1, 2, 6, 7, 8, 9, 10}
 
 # --- ОСНОВНАЯ ФУНКЦИЯ ---
+
 def get_crm_orders(days_back=30, domain=DOMAIN, api_key=API_KEY):
     """
-    Парсит заказы из SalesDrive за указанный период (в днях).
-    Оставляет только те заказы, чьи организации и статусы присутствуют в словарях (по crm_code).
+    Загружает все страницы заказов SalesDrive,
+    затем фильтрует их по организации, статусу и оплате.
     """
+
     url = f"https://{domain}.salesdrive.me/api/order/list/"
     headers = {
         "X-Api-Key": api_key,
         "Content-Type": "application/json"
     }
 
-    # 1. Вычисляем дату начала выгрузки (сегодня минус days_back дней)
-    date_from = (datetime.now() - timedelta(days=days_back)).strftime('%Y-%m-%d')
+    date_from = (
+        datetime.now() - timedelta(days=days_back)
+    ).strftime("%Y-%m-%d")
 
-    # 2. Извлекаем только первые коды (crm_code) для формирования "белых списков"
-    allowed_org_ids = {org["crm_code"] for org in ORGANIZATIONS_MAP.values()}
-    allowed_status_ids = {status["crm_code"] for status in STATUSES_MAP.values()}
-    allowed_payment_ids = {p["crm_code"] for p in PAYMENT_METHODS_MAP.values()}
-    
-    # Базовые параметры API запроса
+    allowed_org_ids = {
+        org["crm_code"] for org in ORGANIZATIONS_MAP.values()
+    }
+    allowed_status_ids = {
+        status["crm_code"] for status in STATUSES_MAP.values()
+    }
+    allowed_payment_ids = {
+        p["crm_code"] for p in PAYMENT_METHODS_MAP.values()
+    }
+
+    LIMIT = 100
+
     params = {
-        "limit": 1000,
+        "limit": LIMIT,
         "filter[orderTime][from]": date_from
     }
-    
-    filtered_orders = []
+
+    all_orders = []
     page = 1
 
-    logging.debug(f"🔄 Загрузка заказов с CRM {date_from}...")
+    logging.info(f"Начинаем загрузку заказов SalesDrive с {date_from}")
 
-    # 3. Цикл пагинации для сбора всех страниц
-    while True:
-        params["page"] = page
-        try:
-            response = requests.get(url, headers=headers, params=params, timeout=30)
-            
-            # Проверка на ошибки (например, неверный ключ)
-            if response.status_code != 200:
-                logging.error(f"Ошибка API SalesDrive: {response.status_code} - {response.text}")
-                break
-                
+    try:
+        while True:
+            params["page"] = page
+
+            response = requests.get(
+                url,
+                headers=headers,
+                params=params,
+                timeout=30
+            )
+
+            response.raise_for_status()
+
             data = response.json()
-            orders = data.get('data', [])
-            
+            orders = data.get("data", [])
+
             if not orders:
-                break # Если заказов больше нет, выходим из цикла
-            
-            # 4. Проверяем каждый заказ: есть ли его параметры в наших "белых списках"
-            for order in orders:
-                org_id = order.get('organizationId')
-                status_id = order.get('statusId')
-                payment_id = order.get('payment_method', "error")
-                
-                # Строгое условие: совпадение и по организации, и по статусу
-                if (org_id in allowed_org_ids 
-                    and status_id in allowed_status_ids
-                    and payment_id in allowed_payment_ids):
-                    filtered_orders.append(order)
-            
-            # Проверка метаданных на наличие следующих страниц
-            meta = data.get('meta', {})
-            total_pages = meta.get('totalPages')
-            
-            if total_pages is not None and page >= int(total_pages):
+                logging.info(f"Страница {page} пуста. Загрузка завершена.")
                 break
 
-            if len(orders) < params["limit"]:
+            all_orders.extend(orders)
+
+            logging.info(
+                f"Страница {page}: получено {len(orders)} заказов | "
+                f"Всего загружено: {len(all_orders)}"
+            )
+
+            meta = data.get("meta", {})
+            total_pages = meta.get("totalPages")
+
+            if total_pages is not None and page >= int(total_pages):
+                logging.info(f"Достигнута последняя страница: {total_pages}")
                 break
-            logging.debug(f"Page: {page}")  
+
+            if len(orders) < LIMIT:
+                logging.info("Получено меньше LIMIT заказов. Последняя страница.")
+                break
+
             page += 1
-            
             time.sleep(10)
 
-        except Exception as e:
-            logging.error(f"Ошибка при выполнении запроса: {e}")
-            break
+    except Exception as e:
+        logging.error(
+            f"Ошибка загрузки SalesDrive: {e}. "
+            f"Страница: {page}. Загружено заказов: {len(all_orders)}"
+        )
+        return None
 
-    logging.debug(f"Выгрузка завершена! Найдено подходящих заказов: {len(filtered_orders)}")
+    # Фильтрация после загрузки всех страниц
+    filtered_orders = []
+
+    for order in all_orders:
+        org_id = order.get("organizationId")
+        status_id = order.get("statusId")
+        payment_id = order.get("payment_method", "error")
+
+        if (
+            org_id in allowed_org_ids
+            and status_id in allowed_status_ids
+            and payment_id in allowed_payment_ids
+        ):
+            filtered_orders.append(order)
+
+    logging.info("Загрузка SalesDrive завершена.")
+    logging.info(f"Всего получено заказов: {len(all_orders)}")
+    logging.info(f"После фильтрации: {len(filtered_orders)}")
+    logging.info(
+        f"Исключено фильтрами: "
+        f"{len(all_orders) - len(filtered_orders)}"
+    )
+
     return filtered_orders
+
 
 def get_dilovod_orders(days_back=30, dilovod_token=DILOVOD_TOKEN):
     """
@@ -685,7 +718,15 @@ if __name__ == "__main__":
         exit()
         
     crm_orders = get_crm_orders()
-    dil_orders = get_dilovod_orders()
+
+    if crm_orders is None:
+        logging.error(
+            "Синхронизация остановлена: "
+            "не удалось полностью загрузить заказы SalesDrive."
+        )
+        exit()
+
+dil_orders = get_dilovod_orders()
     
     if dil_orders is None:
         logging.error("Синхронизация остановлена: невозможно получить данные из Діловод.")
