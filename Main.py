@@ -726,7 +726,7 @@ if __name__ == "__main__":
         )
         exit()
 
-dil_orders = get_dilovod_orders()
+    dil_orders = get_dilovod_orders()
     
     if dil_orders is None:
         logging.error("Синхронизация остановлена: невозможно получить данные из Діловод.")
